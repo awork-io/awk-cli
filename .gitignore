@@ -1,0 +1,15 @@
+.DS_Store
+*.user
+*.suo
+*.cache
+*.log
+*.tmp
+
+# dotnet
+bin/
+obj/
+*.pdb
+*.dll
+
+# env
+.env

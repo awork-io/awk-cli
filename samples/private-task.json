@@ -1,0 +1,8 @@
+{
+  "name": "Welcome to awork",
+  "description": "Start here",
+  "baseType": "private",
+  "entityId": "<user-id>",
+  "isPrio": true,
+  "plannedDuration": 1800
+}

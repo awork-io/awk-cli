@@ -1,0 +1,11 @@
+{
+  "workspaceId": "<workspace-id>",
+  "email": "new.user@example.com",
+  "firstName": "New",
+  "lastName": "User",
+  "title": "Engineer",
+  "position": "Platform",
+  "roleId": "<role-id>",
+  "teamIds": ["<team-id>"],
+  "skipSendingEmail": true
+}
