@@ -104,16 +104,15 @@ Output: `src/Awk.Cli/bin/Release/net10.0/<rid>/publish/awork`
 
 ## Configuration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `AWORK_TOKEN` | Yes | Your awork API token (or `BEARER_TOKEN`) |
-| `AWORK_BASE_URL` | No | Override API base URL (default: `https://api.awork.com/api/v1`) |
+Set your awork API token via environment variable or `.env` file:
 
-**CLI overrides:**
 ```bash
---env <PATH>       # Load a different .env file
---base-url <URL>   # Override base URL for this command
+export AWORK_TOKEN=your-token-here
+# or
+echo "AWORK_TOKEN=your-token-here" > .env
 ```
+
+Use `--env <PATH>` to load a different `.env` file.
 
 ---
 
