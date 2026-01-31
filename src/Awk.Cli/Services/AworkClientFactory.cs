@@ -10,12 +10,12 @@ internal sealed class AworkClientFactory
     {
         var http = new HttpClient
         {
-            BaseAddress = new Uri(config.BaseUrl),
+            BaseAddress = new Uri(config.ApiBaseUrl),
             Timeout = TimeSpan.FromSeconds(100)
         };
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.Token);
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         http.DefaultRequestHeaders.UserAgent.ParseAdd("awork-cli/0.1");
-        return new AworkClient(http, config.BaseUrl);
+        return new AworkClient(http, config.ApiBaseUrl);
     }
 }

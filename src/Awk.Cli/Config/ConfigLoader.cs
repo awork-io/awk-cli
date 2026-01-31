@@ -2,21 +2,16 @@ namespace Awk.Config;
 
 internal static class ConfigLoader
 {
-    internal static AppConfig Load(string? envFileOverride, string? baseUrlOverride)
+    internal static AppConfig Load(string? envFileOverride)
     {
         var envFile = string.IsNullOrWhiteSpace(envFileOverride) ? ".env" : envFileOverride.Trim();
-        var config = AppConfig.Default(envFile);
-
         var env = EnvFile.Load(envFile);
 
+        // Base URL override for testing only (not documented)
         var baseUrl = FirstNonEmpty(
-            baseUrlOverride,
             Env("AWORK_BASE_URL"),
-            Env("AWK_BASE_URL"),
-            env.GetValueOrDefault("AWORK_BASE_URL"),
-            env.GetValueOrDefault("AWK_BASE_URL"),
-            config.BaseUrl
-        );
+            env.GetValueOrDefault("AWORK_BASE_URL")
+        ) ?? AppConfig.BaseUrl;
 
         var token = FirstNonEmpty(
             Env("AWORK_TOKEN"),
@@ -34,7 +29,7 @@ internal static class ConfigLoader
             throw new InvalidOperationException($"No bearer token found. Provide it in {envFile} (AWORK_TOKEN or BEARER_TOKEN). ");
         }
 
-        return new AppConfig(baseUrl ?? "https://api.awork.com/api/v1", token, envFile);
+        return new AppConfig(token, envFile, baseUrl);
     }
 
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name);

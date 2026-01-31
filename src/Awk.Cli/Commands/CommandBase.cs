@@ -10,7 +10,7 @@ internal abstract class CommandBase<TSettings> : AsyncCommand<TSettings> where T
 {
     protected AworkClient CreateClient(TSettings settings)
     {
-        var config = ConfigLoader.Load(settings.EnvFile, settings.BaseUrl);
+        var config = ConfigLoader.Load(settings.EnvFile);
         return new AworkClientFactory().Create(config);
     }
 
