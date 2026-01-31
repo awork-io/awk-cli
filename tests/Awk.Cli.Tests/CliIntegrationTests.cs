@@ -158,6 +158,30 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
+    public async Task BodyInlineJson_WritesBody()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "tasks",
+            "create",
+            "--body",
+            "{\"name\":\"Inline\",\"baseType\":\"private\",\"entityId\":\"user-1\"}");
+
+        Assert.Equal(0, result.ExitCode);
+        var request = server.Requests.Single();
+        var body = JsonDocument.Parse(request.Body ?? "{}");
+        Assert.Equal("Inline", body.RootElement.GetProperty("name").GetString());
+        Assert.Equal("private", body.RootElement.GetProperty("baseType").GetString());
+        Assert.Equal("user-1", body.RootElement.GetProperty("entityId").GetString());
+    }
+
+    [Fact]
     public async Task BodyFile_MergesWithSetOverrides()
     {
         using var server = new TestServer(async ctx =>
@@ -242,6 +266,68 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
+    public async Task Http400_ReturnsEnvelope()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 400;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"error\":\"bad\"}");
+        });
+
+        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(400, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Equal("bad", output.RootElement.GetProperty("response").GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Http500_ReturnsEnvelopeWithRawBody()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 500;
+            var bytes = Encoding.UTF8.GetBytes("boom");
+            ctx.Response.ContentType = "text/plain";
+            ctx.Response.ContentLength64 = bytes.Length;
+            await ctx.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+        });
+
+        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(500, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Equal("boom", output.RootElement.GetProperty("response").GetString());
+    }
+
+    [Fact]
+    public async Task NetworkFailure_ReturnsErrorEnvelope()
+    {
+        var result = await RunCliAsync(new Uri("http://127.0.0.1:1/"), "doctor");
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Equal("HttpRequestException", output.RootElement.GetProperty("response").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task MissingToken_ReturnsErrorEnvelope()
+    {
+        var envFile = Path.GetTempFileName();
+        var configFile = Path.GetTempFileName();
+        await File.WriteAllTextAsync(configFile, string.Empty);
+
+        var result = await RunCliAsyncWithoutToken(
+            new Uri("http://127.0.0.1:1/"),
+            "doctor",
+            "--env",
+            envFile,
+            "--config",
+            configFile);
+
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains("No auth token", output.RootElement.GetProperty("response").GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task TraceId_UsesFallbackHeader()
     {
         using var server = new TestServer(async ctx =>
@@ -294,7 +380,38 @@ public sealed class CliIntegrationTests
         Assert.Equal("/users/user-1/contactinfo/contact-1", request.Path);
     }
 
-    private static async Task<CliResult> RunCliAsync(Uri baseUri, params string[] args)
+    [Fact]
+    public async Task DeleteCommand_UsesDeleteMethod()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 204;
+            await ctx.Response.OutputStream.FlushAsync();
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "delete",
+            "user-1");
+
+        Assert.Equal(0, result.ExitCode);
+        var request = server.Requests.Single();
+        Assert.Equal("DELETE", request.Method);
+        Assert.Equal("/users/user-1", request.Path);
+    }
+
+    private static Task<CliResult> RunCliAsync(Uri baseUri, params string[] args) =>
+        RunCliAsyncWithEnv(baseUri, true, null, args);
+
+    private static Task<CliResult> RunCliAsyncWithoutToken(Uri baseUri, params string[] args) =>
+        RunCliAsyncWithEnv(baseUri, false, null, args);
+
+    private static async Task<CliResult> RunCliAsyncWithEnv(
+        Uri baseUri,
+        bool includeToken,
+        Dictionary<string, string?>? envOverrides,
+        params string[] args)
     {
         var cliDll = FindCliDll();
         var psi = new ProcessStartInfo("dotnet")
@@ -307,8 +424,34 @@ public sealed class CliIntegrationTests
         psi.ArgumentList.Add(cliDll);
         foreach (var arg in args) psi.ArgumentList.Add(arg);
 
-        psi.Environment["AWORK_TOKEN"] = "test-token";
         psi.Environment["AWK_TEST_BASE_URL"] = baseUri.ToString().TrimEnd('/');
+
+        if (includeToken)
+        {
+            psi.Environment["AWORK_TOKEN"] = "test-token";
+        }
+        else
+        {
+            psi.Environment.Remove("AWORK_TOKEN");
+            psi.Environment.Remove("AWK_TOKEN");
+            psi.Environment.Remove("AWORK_BEARER_TOKEN");
+            psi.Environment.Remove("BEARER_TOKEN");
+        }
+
+        if (envOverrides is not null)
+        {
+            foreach (var (key, value) in envOverrides)
+            {
+                if (value is null)
+                {
+                    psi.Environment.Remove(key);
+                }
+                else
+                {
+                    psi.Environment[key] = value;
+                }
+            }
+        }
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start CLI process.");
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
