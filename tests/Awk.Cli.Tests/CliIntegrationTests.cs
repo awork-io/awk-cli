@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -91,6 +92,58 @@ public sealed class CliIntegrationTests
         Assert.Equal("region-1", body.RootElement.GetProperty("regionId").GetString());
         var ids = body.RootElement.GetProperty("userIds").EnumerateArray().Select(x => x.GetString()).ToList();
         Assert.Equal(new[] { "user-1", "user-2" }, ids);
+    }
+
+    [Fact]
+    public async Task TasksCreate_BuildsBodyFromOptions()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "tasks",
+            "create",
+            "--name",
+            "Test Task",
+            "--base-type",
+            "private",
+            "--entity-id",
+            "user-1",
+            "--lists",
+            "list-1",
+            "--lists",
+            "list-2");
+
+        Assert.Equal(0, result.ExitCode);
+        var request = server.Requests.Single();
+        Assert.Equal("POST", request.Method);
+        Assert.Equal("/tasks", request.Path);
+
+        var body = JsonDocument.Parse(request.Body ?? "{}");
+        Assert.Equal("Test Task", body.RootElement.GetProperty("name").GetString());
+        Assert.Equal("private", body.RootElement.GetProperty("baseType").GetString());
+        Assert.Equal("user-1", body.RootElement.GetProperty("entityId").GetString());
+        var lists = body.RootElement.GetProperty("lists").EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Equal(new[] { "list-1", "list-2" }, lists);
+    }
+
+    [Fact]
+    public async Task InvalidBodyField_ReturnsErrorEnvelope()
+    {
+        var result = await RunCliAsync(
+            new Uri("http://127.0.0.1:1/"),
+            "tasks",
+            "create",
+            "--set",
+            "unknown=1");
+
+        var output = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
+        Assert.Contains("Unknown body field", output.RootElement.GetProperty("response").GetProperty("error").GetString());
     }
 
     private static async Task<CliResult> RunCliAsync(Uri baseUri, params string[] args)
