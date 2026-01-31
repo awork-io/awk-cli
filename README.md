@@ -1,16 +1,123 @@
 # awork CLI (awk)
 
-Token-only awork CLI. DRY: swagger-driven source generator for full client + DTOs + CLI commands.
+Token-only, swagger-driven awork CLI. Built for agents: stable command names, strict param validation, JSON output envelope.
 
-## Setup
-- Create `.env` with a bearer token:
-  - `AWORK_TOKEN=...` or `BEARER_TOKEN=...`
-- Optional base URL:
-  - `AWORK_BASE_URL=https://api.awork.com/api/v1`
-
-## Build
+## Quick start
 ```
-dotnet build
+echo "AWORK_TOKEN=..." > .env
+dotnet run --project src/Awk.Cli -- doctor
+```
+
+## Configuration
+Tokens (required):
+- `AWORK_TOKEN=...` or `BEARER_TOKEN=...`
+
+Base URL (optional):
+- `AWORK_BASE_URL=https://api.awork.com/api/v1`
+
+Overrides:
+- `--env <PATH>` to load a different env file
+- `--base-url <URL>` to override base URL
+
+## Command structure
+- Commands are grouped by Swagger tags (e.g., `users`, `tasks`, `projects`).
+- Path params are positional, in path order.
+- Options are kebab-case.
+- Naming uses verbs (`list`, `get`, `create`, `update`, `delete`) + action verbs (`set-`, `add-`, `remove-`, `assign-`).
+
+List commands:
+```
+dotnet run --project src/Awk.Cli -- --help
+dotnet run --project src/Awk.Cli -- users --help
+```
+
+## Examples
+List users:
+```
+dotnet run --project src/Awk.Cli -- users list
+```
+
+Get user by id (positional path param):
+```
+dotnet run --project src/Awk.Cli -- users get <user-id>
+```
+
+Search with query params (bool/int):
+```
+dotnet run --project src/Awk.Cli -- search get-search \
+  --search-term "agent" \
+  --search-types "user" \
+  --top 3 \
+  --include-closed-and-stuck true
+```
+
+Create a private task (params):
+```
+dotnet run --project src/Awk.Cli -- tasks create \
+  --name "Welcome" \
+  --base-type private \
+  --entity-id <user-id>
+```
+
+Create a task from JSON:
+```
+dotnet run --project src/Awk.Cli -- tasks create --body @samples/private-task.json
+```
+
+Merge JSON body + overrides:
+```
+dotnet run --project src/Awk.Cli -- tasks create \
+  --body @payload.json \
+  --set name="Override"
+```
+
+Array body via `--set-json`:
+```
+dotnet run --project src/Awk.Cli -- absence-regions users-assign \
+  --set regionId=<region-id> \
+  --set-json userIds='["u1","u2"]'
+```
+
+Array body via file:
+```
+dotnet run --project src/Awk.Cli -- absence-regions users-assign \
+  --set regionId=<region-id> \
+  --set-json userIds=@/tmp/users.json
+```
+
+Nested body properties:
+```
+dotnet run --project src/Awk.Cli -- task-tags tasks-update-tags \
+  --set newTag.name=Priority
+```
+
+Invite user (skip email) + accept:
+```
+dotnet run --project src/Awk.Cli -- invitations create --body @samples/invite.json
+dotnet run --project src/Awk.Cli -- invitations accept --body @samples/accept.json
+```
+
+## Output contract
+Every command prints JSON:
+- `statusCode`
+- `traceId` (best effort, from response headers)
+- `response` (JSON when possible, otherwise raw text)
+
+## Code generation
+Source generator reads `swagger.json` and emits:
+- DTOs in `Awk.Generated`
+- full API client (one method per operationId)
+- CLI commands grouped by Swagger tags
+
+If swagger changes, rebuild. No manual DTOs.
+
+## Repo layout
+```
+src/Awk.CodeGen      # source generator
+src/Awk.Cli          # CLI app
+tests/Awk.CodeGen.Tests
+tests/Awk.Cli.Tests
+scripts/             # bash test helpers
 ```
 
 ## Tests
@@ -22,74 +129,14 @@ dotnet build
 ./scripts/test-unit.sh
 ```
 
-## Run
+## Publishing
+CLI binary:
 ```
-dotnet run --project src/Awk.Cli -- doctor
+dotnet publish src/Awk.Cli -c Release -r osx-x64 --self-contained false
 ```
+Output: `src/Awk.Cli/bin/Release/net10.0/<rid>/publish`.
 
-## Output contract
-Every command prints JSON with:
-- `statusCode`
-- `traceId` (best effort, from response headers)
-- `response` (JSON when possible, otherwise raw text)
-
-## Codegen
-Source generator reads `swagger.json` and emits:
-- DTOs in `Awk.Generated`
-- Full API client with one method per operationId (unique names)
-- CLI commands grouped by Swagger tags
-
-If swagger changes, rebuild. No manual DTOs.
-
-## CLI usage
+Source generator package (NuGet):
 ```
-dotnet run --project src/Awk.Cli -- --help
-dotnet run --project src/Awk.Cli -- tasks --help
-```
-
-Path params are positional args in path order (matches awork-debugger style).
-
-### Examples
-Invite user (skip email) + accept:
-```
-dotnet run --project src/Awk.Cli -- invitations create --body @samples/invite.json
-dotnet run --project src/Awk.Cli -- invitations accept --body @samples/accept.json
-```
-
-Invite user with params:
-```
-dotnet run --project src/Awk.Cli -- invitations create \
-  --workspace-id <workspace-id> \
-  --email new.user@example.com \
-  --first-name New \
-  --last-name User \
-  --skip-sending-email true \
-  --team-ids <team-id> \
-  --team-ids <team-id-2>
-```
-
-Create private task:
-```
-dotnet run --project src/Awk.Cli -- tasks create --body @samples/private-task.json
-```
-
-Create private task with params:
-```
-dotnet run --project src/Awk.Cli -- tasks create \
-  --name "Welcome" \
-  --base-type private \
-  --entity-id <user-id>
-```
-
-Get a task (positional path param):
-```
-dotnet run --project src/Awk.Cli -- tasks get <task-id>
-```
-
-### Advanced body input
-You can still use JSON bodies and patch values:
-```
---body @payload.json
---set name=\"New name\"
---set-json teamIds='[\"id1\",\"id2\"]'
+dotnet pack src/Awk.CodeGen -c Release
 ```
