@@ -47,7 +47,6 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
         {
             var loaded = await ConfigLoader.Load(
                 settings.EnvFile,
-                settings.BaseUrl,
                 null,
                 settings.ConfigPath,
                 cancellationToken);
@@ -65,13 +64,12 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
 
                 var updated = baseConfig with
                 {
-                    ApiBaseUrl = effective.ApiBaseUrl,
                     ApiToken = apiToken,
                     OAuth = (baseConfig.OAuth ?? OAuthConfig.Default) with { Token = null }
                 };
 
                 await ConfigLoader.SaveUserConfig(updated, loaded.ConfigPath, cancellationToken);
-                return Output(ResponseEnvelope.Ok(0, null, new { status = "token-saved", baseUrl = updated.ApiBaseUrl }));
+                return Output(ResponseEnvelope.Ok(0, null, new { status = "token-saved", baseUrl = AworkBaseUrl.Resolve() }));
             }
 
             var redirectUri = FirstNonEmpty(settings.RedirectUri, effective.OAuth?.RedirectUri, AworkOAuthDefaults.RedirectUri);
@@ -83,7 +81,6 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
             {
                 var version = typeof(AuthLoginCommand).Assembly.GetName().Version?.ToString();
                 var registration = await AworkOAuthService.RegisterClient(
-                    effective.ApiBaseUrl,
                     Guid.NewGuid().ToString("N"),
                     clientName,
                     version,
@@ -113,7 +110,7 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
                 clientId,
                 redirectUri,
                 scopes,
-                AworkOAuthDefaults.AuthorizationEndpoint(effective.ApiBaseUrl));
+                AworkOAuthDefaults.AuthorizationEndpoint);
 
             if (!settings.NoOpen && TryOpenBrowser(authRequest.Url))
             {
@@ -129,7 +126,6 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
 
             var callback = await server.WaitForCallback(authRequest.State, cancellationToken);
             var oauthToken = await AworkOAuthService.ExchangeCode(
-                effective.ApiBaseUrl,
                 clientId,
                 callback.Code,
                 authRequest.CodeVerifier,
@@ -138,7 +134,6 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
 
             var updatedConfig = baseConfig with
             {
-                ApiBaseUrl = effective.ApiBaseUrl,
                 ApiToken = null,
                 OAuth = new OAuthConfig(clientId, redirectUri, scopes, oauthToken)
             };
@@ -147,7 +142,7 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
             return Output(ResponseEnvelope.Ok(0, null, new
             {
                 status = "oauth-saved",
-                baseUrl = updatedConfig.ApiBaseUrl,
+                baseUrl = AworkBaseUrl.Resolve(),
                 clientId,
                 oauthToken.ExpiresAt
             }));
@@ -204,7 +199,6 @@ internal sealed class AuthStatusCommand : CommandBase<BaseSettings>
         {
             var loaded = await ConfigLoader.Load(
                 settings.EnvFile,
-                settings.BaseUrl,
                 settings.Token,
                 settings.ConfigPath,
                 cancellationToken);
@@ -214,7 +208,7 @@ internal sealed class AuthStatusCommand : CommandBase<BaseSettings>
 
             var response = new
             {
-                baseUrl = config.ApiBaseUrl,
+                baseUrl = AworkBaseUrl.Resolve(),
                 configPath = loaded.ConfigPath,
                 apiToken = Mask(config.ApiToken),
                 oauth = new
@@ -261,7 +255,6 @@ internal sealed class AuthLogoutCommand : CommandBase<AuthLogoutSettings>
         {
             var loaded = await ConfigLoader.Load(
                 settings.EnvFile,
-                settings.BaseUrl,
                 null,
                 settings.ConfigPath,
                 cancellationToken);

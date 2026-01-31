@@ -5,8 +5,9 @@ namespace Awk.Services;
 
 internal sealed class AworkClientFactory
 {
-    internal AworkClient Create(string baseUrl, string token)
+    internal AworkClient Create(string token)
     {
+        var baseUrl = AworkBaseUrl.Resolve();
         var http = new HttpClient
         {
             BaseAddress = new Uri(baseUrl),

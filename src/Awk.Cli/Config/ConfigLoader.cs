@@ -17,7 +17,6 @@ internal static class ConfigLoader
 
     internal static async Task<ConfigLoadResult> Load(
         string? envFileOverride,
-        string? baseUrlOverride,
         string? tokenOverride,
         string? configPathOverride,
         CancellationToken cancellationToken)
@@ -28,15 +27,6 @@ internal static class ConfigLoader
         baseConfig = Normalize(baseConfig, envFile);
 
         var env = EnvFile.Load(envFile);
-
-        var baseUrl = FirstNonEmpty(
-            baseUrlOverride,
-            Env("AWORK_BASE_URL"),
-            Env("AWK_BASE_URL"),
-            env.GetValueOrDefault("AWORK_BASE_URL"),
-            env.GetValueOrDefault("AWK_BASE_URL"),
-            baseConfig.ApiBaseUrl
-        ) ?? AppConfig.DefaultBaseUrl;
 
         var token = FirstNonEmpty(
             tokenOverride,
@@ -77,7 +67,6 @@ internal static class ConfigLoader
 
         var effective = baseConfig with
         {
-            ApiBaseUrl = baseUrl,
             ApiToken = token,
             OAuth = (baseConfig.OAuth ?? OAuthConfig.Default) with
             {
@@ -121,12 +110,8 @@ internal static class ConfigLoader
 
     private static AppConfig Normalize(AppConfig config, string envFile)
     {
-        var baseUrl = string.IsNullOrWhiteSpace(config.ApiBaseUrl)
-            ? AppConfig.DefaultBaseUrl
-            : config.ApiBaseUrl.Trim();
-
         var oauth = config.OAuth ?? OAuthConfig.Default;
-        return new AppConfig(baseUrl, config.ApiToken, oauth)
+        return new AppConfig(config.ApiToken, oauth)
         {
             EnvFile = envFile
         };

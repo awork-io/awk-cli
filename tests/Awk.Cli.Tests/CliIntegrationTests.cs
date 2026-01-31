@@ -308,7 +308,7 @@ public sealed class CliIntegrationTests
         foreach (var arg in args) psi.ArgumentList.Add(arg);
 
         psi.Environment["AWORK_TOKEN"] = "test-token";
-        psi.Environment["AWORK_BASE_URL"] = baseUri.ToString().TrimEnd('/');
+        psi.Environment["AWK_TEST_BASE_URL"] = baseUri.ToString().TrimEnd('/');
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start CLI process.");
         var stdOutTask = process.StandardOutput.ReadToEndAsync();

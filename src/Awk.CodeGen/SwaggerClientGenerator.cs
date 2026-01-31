@@ -15,7 +15,6 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
     private static readonly HashSet<string> BaseSettingsPropertyNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "EnvFile",
-        "BaseUrl",
         "Token",
         "AuthMode",
         "ConfigPath",
@@ -27,7 +26,6 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
     private static readonly HashSet<string> BaseOptionNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "env",
-        "base-url",
         "token",
         "auth-mode",
         "config",

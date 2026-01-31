@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 namespace Awk.Config;
 
 internal sealed record AppConfig(
-    string ApiBaseUrl,
     string? ApiToken,
     OAuthConfig? OAuth)
 {
@@ -13,7 +12,6 @@ internal sealed record AppConfig(
     internal string EnvFile { get; init; } = ".env";
 
     internal static AppConfig Default(string envFile) => new(
-        ApiBaseUrl: DefaultBaseUrl,
         ApiToken: null,
         OAuth: OAuthConfig.Default)
     {

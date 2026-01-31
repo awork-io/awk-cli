@@ -72,7 +72,6 @@ internal static class AuthResolver
         }
 
         var refreshed = await AworkOAuthService.Refresh(
-            effectiveConfig.ApiBaseUrl,
             effectiveConfig.OAuth.RegisteredClientId!,
             oauth.RefreshToken,
             cancellationToken);

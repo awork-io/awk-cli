@@ -10,11 +10,11 @@ internal static class AworkOAuthDefaults
     internal const string RedirectUri = "http://localhost:8400/oauth/callback";
     internal const string Scopes = "full_access offline_access";
 
-    internal static Uri AuthorizationEndpoint(string baseUrl) => new($"{Normalize(baseUrl)}/accounts/authorize");
+    internal static Uri AuthorizationEndpoint => new($"{Normalize(AworkBaseUrl.Resolve())}/accounts/authorize");
 
-    internal static Uri TokenEndpoint(string baseUrl) => new($"{Normalize(baseUrl)}/accounts/token");
+    internal static Uri TokenEndpoint => new($"{Normalize(AworkBaseUrl.Resolve())}/accounts/token");
 
-    internal static Uri RegistrationEndpoint(string baseUrl) => new($"{Normalize(baseUrl)}/clientapplications/register");
+    internal static Uri RegistrationEndpoint => new($"{Normalize(AworkBaseUrl.Resolve())}/clientapplications/register");
 
     private static string Normalize(string baseUrl) => baseUrl.TrimEnd('/');
 }
@@ -36,7 +36,6 @@ internal static class AworkOAuthService
     };
 
     internal static async Task<AworkClientRegistration> RegisterClient(
-        string baseUrl,
         string softwareId,
         string clientName,
         string? softwareVersion,
@@ -58,7 +57,7 @@ internal static class AworkOAuthService
         };
 
         using var http = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.RegistrationEndpoint(baseUrl))
+        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.RegistrationEndpoint)
         {
             Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), System.Text.Encoding.UTF8, "application/json"),
         };
@@ -88,7 +87,6 @@ internal static class AworkOAuthService
     }
 
     internal static async Task<OAuthToken> ExchangeCode(
-        string baseUrl,
         string clientId,
         string code,
         string codeVerifier,
@@ -105,7 +103,7 @@ internal static class AworkOAuthService
             ["redirect_uri"] = redirectUri,
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.TokenEndpoint(baseUrl))
+        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.TokenEndpoint)
         {
             Content = new FormUrlEncodedContent(payload!),
         };
@@ -125,7 +123,6 @@ internal static class AworkOAuthService
     }
 
     internal static async Task<OAuthToken> Refresh(
-        string baseUrl,
         string clientId,
         string refreshToken,
         CancellationToken cancellationToken)
@@ -138,7 +135,7 @@ internal static class AworkOAuthService
             ["refresh_token"] = refreshToken,
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.TokenEndpoint(baseUrl))
+        using var request = new HttpRequestMessage(HttpMethod.Post, AworkOAuthDefaults.TokenEndpoint)
         {
             Content = new FormUrlEncodedContent(payload!),
         };

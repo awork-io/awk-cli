@@ -12,7 +12,6 @@ internal abstract class CommandBase<TSettings> : AsyncCommand<TSettings> where T
     {
         var loaded = await ConfigLoader.Load(
             settings.EnvFile,
-            settings.BaseUrl,
             settings.Token,
             settings.ConfigPath,
             cancellationToken);
@@ -29,7 +28,7 @@ internal abstract class CommandBase<TSettings> : AsyncCommand<TSettings> where T
             await ConfigLoader.SaveUserConfig(auth.UpdatedConfig, loaded.ConfigPath, cancellationToken);
         }
 
-        return new AworkClientFactory().Create(loaded.EffectiveConfig.ApiBaseUrl, auth.Token);
+        return new AworkClientFactory().Create(auth.Token);
     }
 
     protected int Output(object payload) => JsonConsole.Write(payload);
