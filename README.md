@@ -6,6 +6,13 @@
   <p align="center">
     Token-only authentication • Swagger-driven code generation • Structured JSON output
   </p>
+  <p align="center">
+    <a href="https://github.com/awork-io/awk-cli/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/awork-io/awk-cli/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+    <a href="https://github.com/awork-io/awk-cli/releases"><img src="https://img.shields.io/github/v/release/awork-io/awk-cli?style=flat-square&color=blue" alt="Release"></a>
+    <a href="https://github.com/awork-io/awk-cli/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License"></a>
+    <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=flat-square&logo=dotnet" alt=".NET 10">
+    <img src="https://img.shields.io/badge/OpenAPI-3.0-6BA539?style=flat-square&logo=openapiinitiative" alt="OpenAPI 3.0">
+  </p>
 </p>
 
 ---
@@ -52,23 +59,43 @@ dotnet run --project src/Awk.Cli -- --help
 
 ## Installation
 
-### From source (recommended)
+### Homebrew (macOS/Linux)
 ```bash
-git clone https://github.com/your-org/awk-cli.git
-cd awk-cli
-dotnet build
+brew tap awork-io/tap
+brew install awk-cli
 ```
 
-### Publish self-contained binary
+### Download binary
+Grab the latest release for your platform from [GitHub Releases](https://github.com/awork-io/awk-cli/releases).
+
+| Platform | Binary |
+|----------|--------|
+| macOS (Apple Silicon) | `awork-osx-arm64.tar.gz` |
+| macOS (Intel) | `awork-osx-x64.tar.gz` |
+| Linux (x64) | `awork-linux-x64.tar.gz` |
+| Windows (x64) | `awork-win-x64.zip` |
+
+### From source
 ```bash
-# macOS
-dotnet publish src/Awk.Cli -c Release -r osx-x64 --self-contained false
+git clone https://github.com/awork-io/awk-cli.git
+cd awk-cli
+dotnet build
+dotnet run --project src/Awk.Cli -- --help
+```
+
+### Build release binary
+```bash
+# macOS Apple Silicon
+dotnet publish src/Awk.Cli -c Release -r osx-arm64
+
+# macOS Intel
+dotnet publish src/Awk.Cli -c Release -r osx-x64
 
 # Linux
-dotnet publish src/Awk.Cli -c Release -r linux-x64 --self-contained false
+dotnet publish src/Awk.Cli -c Release -r linux-x64
 
 # Windows
-dotnet publish src/Awk.Cli -c Release -r win-x64 --self-contained false
+dotnet publish src/Awk.Cli -c Release -r win-x64
 ```
 
 Output: `src/Awk.Cli/bin/Release/net10.0/<rid>/publish/awork`
@@ -296,12 +323,17 @@ This makes `awk` trivial to integrate with `jq`, scripts, and AI agents.
 
 ```
 awk-cli/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml            # Build & test on PRs
+│       └── release.yml       # Multi-platform release on tags
 ├── src/
 │   ├── Awk.CodeGen/          # Source generator (NuGet-packageable)
 │   └── Awk.Cli/              # CLI application
 ├── tests/
 │   ├── Awk.CodeGen.Tests/    # Generator unit tests
 │   └── Awk.Cli.Tests/        # CLI integration tests
+├── homebrew/                 # Homebrew formula template
 ├── scripts/                  # Test helpers
 ├── samples/                  # Example JSON payloads
 └── swagger.json              # awork OpenAPI spec
@@ -332,6 +364,20 @@ dotnet pack src/Awk.CodeGen -c Release
 ```
 
 Output: `src/Awk.CodeGen/bin/Release/Awk.CodeGen.*.nupkg`
+
+### Create a Release
+
+Push a version tag to trigger the release workflow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This will:
+1. Build binaries for macOS (ARM64/x64), Linux, and Windows
+2. Create a GitHub release with all artifacts
+3. Update the Homebrew formula (requires `HOMEBREW_TAP_TOKEN` secret)
 
 ---
 
