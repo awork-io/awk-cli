@@ -10,27 +10,47 @@ namespace Awk.Cli.Tests;
 public sealed class CliIntegrationTests
 {
     [Fact]
-    public async Task DoctorCommand_OutputsEnvelopeAndTraceId()
+    public async Task DoctorCommand_ShowsWorkspaceAndUser()
     {
         using var server = new TestServer(async ctx =>
         {
             ctx.Response.StatusCode = 200;
-            ctx.Response.Headers["trace-id"] = "test-trace";
-            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                {
+                    "firstName": "Test",
+                    "lastName": "User",
+                    "userContactInfos": [{"type": "email", "value": "test@example.com"}],
+                    "workspace": {"name": "Test Workspace"}
+                }
+                """);
         });
 
         var result = await RunCliAsync(server.BaseUri, "doctor");
         Assert.Equal(0, result.ExitCode);
-
-        var output = JsonDocument.Parse(result.StdOut);
-        Assert.Equal(200, output.RootElement.GetProperty("statusCode").GetInt32());
-        Assert.Equal("test-trace", output.RootElement.GetProperty("traceId").GetString());
-        Assert.True(output.RootElement.GetProperty("response").GetProperty("ok").GetBoolean());
+        Assert.Contains("Logged in as", result.StdOut);
+        Assert.Contains("Test User", result.StdOut);
+        Assert.Contains("test@example.com", result.StdOut);
+        Assert.Contains("Test Workspace", result.StdOut);
 
         var request = server.Requests.Single();
         Assert.Equal("GET", request.Method);
         Assert.Equal("/me", request.Path);
         Assert.Equal("Bearer test-token", request.Headers["Authorization"]);
+    }
+
+    [Fact]
+    public async Task DoctorCommand_InvalidToken_ShowsError()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 401;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """{"error": "Unauthorized"}""");
+        });
+
+        var result = await RunCliAsync(server.BaseUri, "doctor");
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Authentication failed", result.StdOut);
+        Assert.Contains("auth login", result.StdOut);
     }
 
     [Fact]
@@ -277,7 +297,7 @@ public sealed class CliIntegrationTests
             await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"error\":\"bad\"}");
         });
 
-        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var result = await RunCliAsync(server.BaseUri, "users", "me");
         var output = JsonDocument.Parse(result.StdOut);
         Assert.Equal(400, output.RootElement.GetProperty("statusCode").GetInt32());
         Assert.Equal("bad", output.RootElement.GetProperty("response").GetProperty("error").GetString());
@@ -295,7 +315,7 @@ public sealed class CliIntegrationTests
             await ctx.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
         });
 
-        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var result = await RunCliAsync(server.BaseUri, "users", "me");
         var output = JsonDocument.Parse(result.StdOut);
         Assert.Equal(500, output.RootElement.GetProperty("statusCode").GetInt32());
         Assert.Equal("boom", output.RootElement.GetProperty("response").GetString());
@@ -304,10 +324,30 @@ public sealed class CliIntegrationTests
     [Fact]
     public async Task NetworkFailure_ReturnsErrorEnvelope()
     {
-        var result = await RunCliAsync(new Uri("http://127.0.0.1:1/"), "doctor");
+        var result = await RunCliAsync(new Uri("http://127.0.0.1:1/"), "users", "me");
         var output = JsonDocument.Parse(result.StdOut);
         Assert.Equal(0, output.RootElement.GetProperty("statusCode").GetInt32());
         Assert.Equal("HttpRequestException", output.RootElement.GetProperty("response").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task MissingToken_DoctorShowsLoginHint()
+    {
+        var envFile = Path.GetTempFileName();
+        var configFile = Path.GetTempFileName();
+        await File.WriteAllTextAsync(configFile, string.Empty);
+
+        var result = await RunCliAsyncWithoutToken(
+            new Uri("http://127.0.0.1:1/"),
+            "doctor",
+            "--env",
+            envFile,
+            "--config",
+            configFile);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Not logged in", result.StdOut);
+        Assert.Contains("auth login", result.StdOut);
     }
 
     [Fact]
@@ -319,7 +359,8 @@ public sealed class CliIntegrationTests
 
         var result = await RunCliAsyncWithoutToken(
             new Uri("http://127.0.0.1:1/"),
-            "doctor",
+            "users",
+            "me",
             "--env",
             envFile,
             "--config",
@@ -340,7 +381,7 @@ public sealed class CliIntegrationTests
             await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
         });
 
-        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var result = await RunCliAsync(server.BaseUri, "users", "me");
         var output = JsonDocument.Parse(result.StdOut);
         Assert.Equal("00-test", output.RootElement.GetProperty("traceId").GetString());
     }
@@ -357,7 +398,7 @@ public sealed class CliIntegrationTests
             await ctx.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
         });
 
-        var result = await RunCliAsync(server.BaseUri, "doctor");
+        var result = await RunCliAsync(server.BaseUri, "users", "me");
         var output = JsonDocument.Parse(result.StdOut);
         Assert.Equal("plain", output.RootElement.GetProperty("response").GetString());
     }
@@ -467,13 +508,24 @@ public sealed class CliIntegrationTests
     private static string FindCliDll()
     {
         var root = FindRepoRoot();
-        var path = Path.Combine(root, "src", "Awk.Cli", "bin", "Debug", "net10.0", "awork.dll");
-        if (!File.Exists(path))
+
+        // Try RID-specific path first (self-contained build)
+        var binDir = Path.Combine(root, "src", "Awk.Cli", "bin", "Debug", "net10.0");
+        if (Directory.Exists(binDir))
         {
-            throw new FileNotFoundException("CLI build output not found. Build the CLI before running tests.", path);
+            var ridDirs = Directory.GetDirectories(binDir);
+            foreach (var ridDir in ridDirs)
+            {
+                var ridPath = Path.Combine(ridDir, "awk-cli.dll");
+                if (File.Exists(ridPath)) return ridPath;
+            }
         }
 
-        return path;
+        // Fallback to non-RID path
+        var path = Path.Combine(binDir, "awk-cli.dll");
+        if (File.Exists(path)) return path;
+
+        throw new FileNotFoundException("CLI build output not found. Build the CLI before running tests.", path);
     }
 
     private static string FindRepoRoot()
