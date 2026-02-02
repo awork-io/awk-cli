@@ -2,14 +2,32 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.new_tag }}
+      version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and create tag
+        id: bump
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+
   build:
+    needs: version
     strategy:
       matrix:
         include:
@@ -54,7 +72,7 @@ jobs:
           path: ${{ matrix.artifact }}.*
 
   release:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
 
     steps:
@@ -67,11 +85,12 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           files: artifacts/*
           generate_release_notes: true
 
   homebrew:
-    needs: release
+    needs: [version, release]
     runs-on: ubuntu-latest
 
     steps:
@@ -80,6 +99,6 @@ jobs:
         with:
           formula-name: awk-cli
           homebrew-tap: awork-io/homebrew-tap
-          download-url: https://github.com/awork-io/awk-cli/releases/download/${{ github.ref_name }}/awork-osx-arm64.tar.gz
+          download-url: https://github.com/awork-io/awk-cli/releases/download/${{ needs.version.outputs.tag }}/awork-osx-arm64.tar.gz
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
