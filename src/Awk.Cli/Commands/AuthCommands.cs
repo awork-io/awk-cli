@@ -73,6 +73,7 @@ internal sealed class AuthLoginCommand : CommandBase<AuthLoginSettings>
             }
 
             var redirectUri = FirstNonEmpty(settings.RedirectUri, effective.OAuth?.RedirectUri, AworkOAuthDefaults.RedirectUri);
+            redirectUri = OAuthAuthorizationRequestFactory.NormalizeRedirectUri(redirectUri);
             var scopes = FirstNonEmpty(settings.Scopes, effective.OAuth?.Scopes, AworkOAuthDefaults.Scopes);
             var clientName = string.IsNullOrWhiteSpace(settings.ClientName) ? "awork-cli" : settings.ClientName.Trim();
             var clientId = effective.OAuth?.RegisteredClientId;

@@ -40,20 +40,26 @@ internal static class OAuthAuthorizationRequestFactory
             if (sb.Length > 0) sb.Append('&');
             sb.Append(Uri.EscapeDataString(key));
             sb.Append('=');
-            sb.Append(Uri.EscapeDataString(value));
+            if (string.Equals(key, "redirect_uri", StringComparison.Ordinal))
+            {
+                sb.Append(value);
+            }
+            else
+            {
+                sb.Append(Uri.EscapeDataString(value));
+            }
         }
         return sb.ToString();
     }
 
-    private static string NormalizeRedirectUri(string value)
+    internal static string NormalizeRedirectUri(string value)
     {
         var current = value.Trim();
         if (string.IsNullOrWhiteSpace(current)) return current;
 
         for (var i = 0; i < 5; i++)
         {
-            if (current.Contains("://", StringComparison.OrdinalIgnoreCase) &&
-                Uri.TryCreate(current, UriKind.Absolute, out _))
+            if (Uri.TryCreate(current, UriKind.Absolute, out _))
             {
                 return current;
             }
@@ -63,7 +69,13 @@ internal static class OAuthAuthorizationRequestFactory
                 return current;
             }
 
-            current = Uri.UnescapeDataString(current);
+            var unescaped = Uri.UnescapeDataString(current);
+            if (string.Equals(unescaped, current, StringComparison.Ordinal))
+            {
+                return current;
+            }
+
+            current = unescaped;
         }
 
         return current;
