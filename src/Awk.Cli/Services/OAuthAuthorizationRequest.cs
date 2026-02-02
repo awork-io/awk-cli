@@ -40,14 +40,7 @@ internal static class OAuthAuthorizationRequestFactory
             if (sb.Length > 0) sb.Append('&');
             sb.Append(Uri.EscapeDataString(key));
             sb.Append('=');
-            if (string.Equals(key, "redirect_uri", StringComparison.Ordinal))
-            {
-                sb.Append(value);
-            }
-            else
-            {
-                sb.Append(Uri.EscapeDataString(value));
-            }
+            sb.Append(Uri.EscapeDataString(value));
         }
         return sb.ToString();
     }
