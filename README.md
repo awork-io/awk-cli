@@ -38,30 +38,6 @@ $ awk users list --top 3
 
 ---
 
-## Quick Start
-
-**1. Set your token (fastest path)**
-```bash
-echo "AWORK_TOKEN=your-token-here" > .env
-```
-
-**2. Or login with OAuth (DCR)**
-```bash
-dotnet run --project src/Awk.Cli -- auth login
-```
-
-**3. Verify setup**
-```bash
-dotnet run --project src/Awk.Cli -- doctor
-```
-
-**4. Explore**
-```bash
-dotnet run --project src/Awk.Cli -- --help
-```
-
----
-
 ## Installation
 
 ### Homebrew (macOS/Linux)
@@ -80,30 +56,29 @@ Grab the latest release for your platform from [GitHub Releases](https://github.
 | Linux (x64) | `awork-linux-x64.tar.gz` |
 | Windows (x64) | `awork-win-x64.zip` |
 
-### From source
+---
+
+## Quick Start
+
+**1. Set your token (fastest path)**
 ```bash
-git clone https://github.com/awork-io/awk-cli.git
-cd awk-cli
-dotnet build
-dotnet run --project src/Awk.Cli -- --help
+echo "AWORK_TOKEN=your-token-here" > .env
 ```
 
-### Build release binary
+**2. Or login with OAuth (DCR)**
 ```bash
-# macOS Apple Silicon
-dotnet publish src/Awk.Cli -c Release -r osx-arm64
-
-# macOS Intel
-dotnet publish src/Awk.Cli -c Release -r osx-x64
-
-# Linux
-dotnet publish src/Awk.Cli -c Release -r linux-x64
-
-# Windows
-dotnet publish src/Awk.Cli -c Release -r win-x64
+awk auth login
 ```
 
-Output: `src/Awk.Cli/bin/Release/net10.0/<rid>/publish/awork`
+**3. Verify setup**
+```bash
+awk doctor
+```
+
+**4. Explore**
+```bash
+awk --help
+```
 
 ---
 
@@ -343,6 +318,74 @@ This makes `awk` trivial to integrate with `jq`, scripts, and AI agents.
 
 ---
 
+## Development
+
+### Building from Source
+
+```bash
+git clone https://github.com/awork-io/awk-cli.git
+cd awk-cli
+dotnet build
+dotnet run --project src/Awk.Cli -- --help
+```
+
+### Build Release Binary
+
+```bash
+# macOS Apple Silicon
+dotnet publish src/Awk.Cli -c Release -r osx-arm64
+
+# macOS Intel
+dotnet publish src/Awk.Cli -c Release -r osx-x64
+
+# Linux
+dotnet publish src/Awk.Cli -c Release -r linux-x64
+
+# Windows
+dotnet publish src/Awk.Cli -c Release -r win-x64
+```
+
+Output: `src/Awk.Cli/bin/Release/net10.0/<rid>/publish/awork`
+
+### Run Tests
+
+```bash
+# All tests
+dotnet test
+
+# Individual test suites
+./scripts/test-build.sh       # Build verification
+./scripts/test-cli-names.sh   # Command naming consistency
+./scripts/test-example.sh     # Example command validation
+./scripts/test-params.sh      # Parameter handling
+./scripts/test-auth.sh        # Auth flows (token)
+./scripts/test-unit.sh        # Unit tests
+```
+
+### Package the Source Generator
+
+```bash
+dotnet pack src/Awk.CodeGen -c Release
+```
+
+Output: `src/Awk.CodeGen/bin/Release/Awk.CodeGen.*.nupkg`
+
+### Create a Release
+
+Push a version tag to trigger the release workflow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This will:
+1. Build binaries for macOS (ARM64/x64), Linux, and Windows
+2. Create a GitHub release with all artifacts
+3. Update the Homebrew formula (requires `HOMEBREW_TAP_TOKEN` secret)
+
+---
+
 ## Architecture
 
 ```
@@ -395,47 +438,6 @@ awk-cli/
 ├── samples/                  # Example JSON payloads
 └── swagger.json              # awork OpenAPI spec
 ```
-
----
-
-## Development
-
-### Run Tests
-
-```bash
-# All tests
-dotnet test
-
-# Individual test suites
-./scripts/test-build.sh       # Build verification
-./scripts/test-cli-names.sh   # Command naming consistency
-./scripts/test-example.sh     # Example command validation
-./scripts/test-params.sh      # Parameter handling
-./scripts/test-auth.sh        # Auth flows (token)
-./scripts/test-unit.sh        # Unit tests
-```
-
-### Package the Source Generator
-
-```bash
-dotnet pack src/Awk.CodeGen -c Release
-```
-
-Output: `src/Awk.CodeGen/bin/Release/Awk.CodeGen.*.nupkg`
-
-### Create a Release
-
-Push a version tag to trigger the release workflow:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-This will:
-1. Build binaries for macOS (ARM64/x64), Linux, and Windows
-2. Create a GitHub release with all artifacts
-3. Update the Homebrew formula (requires `HOMEBREW_TAP_TOKEN` secret)
 
 ---
 
