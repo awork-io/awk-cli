@@ -625,6 +625,42 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
+    public async Task OutputTable_WithoutSelect_RendersAllColumns()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                [
+                  {"id": "1", "name": "Alice", "email": "alice@test.com"},
+                  {"id": "2", "name": "Bob", "email": "bob@test.com"}
+                ]
+                """);
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list",
+            "--output",
+            "table");
+
+        Assert.Equal(0, result.ExitCode);
+        // All columns present
+        Assert.Contains("id", result.StdOut);
+        Assert.Contains("name", result.StdOut);
+        Assert.Contains("email", result.StdOut);
+        // Data present
+        Assert.Contains("Alice", result.StdOut);
+        Assert.Contains("Bob", result.StdOut);
+        Assert.Contains("alice@test.com", result.StdOut);
+        // Row count
+        Assert.Contains("2 row(s)", result.StdOut);
+        // Table borders
+        Assert.Contains("╭", result.StdOut);
+    }
+
+    [Fact]
     public async Task SkillCommand_OutputsMarkdownGuide()
     {
         var result = await RunCliAsyncWithoutToken(new Uri("http://127.0.0.1:1/"), "skill");
