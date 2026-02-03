@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace Awk.Cli.Tests;
 
@@ -82,6 +83,88 @@ public sealed class CliIntegrationTests
         Assert.Equal("user", request.Query["searchTypes"]);
         Assert.Equal("3", request.Query["top"]);
         Assert.Equal("true", request.Query["includeClosedAndStuck"]);
+    }
+
+    [Fact]
+    public async Task SelectQueryParam_IsNotSent()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list",
+            "--select",
+            "id,firstName");
+
+        Assert.Equal(0, result.ExitCode);
+        var request = server.Requests.Single();
+        Assert.False(request.Query.ContainsKey("select"));
+    }
+
+    [Fact]
+    public async Task SelectQueryParam_FiltersResponseFields()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                [
+                  {
+                    "id": "u1",
+                    "firstName": "Ada",
+                    "lastName": "Lovelace",
+                    "createdOn": "2026-02-01T09:51:40Z"
+                  }
+                ]
+                """);
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list",
+            "--select",
+            "firstName");
+
+        Assert.Equal(0, result.ExitCode);
+        var output = JsonDocument.Parse(result.StdOut);
+        var response = output.RootElement.GetProperty("response");
+        var item = response.EnumerateArray().Single();
+        Assert.Equal("Ada", item.GetProperty("firstName").GetString());
+        Assert.Single(item.EnumerateObject()); // Only firstName, not createdOn
+    }
+
+    [Fact]
+    public async Task RateLimit_RetriesWithRetryAfter()
+    {
+        var attempts = 0;
+        using var server = new TestServer(async ctx =>
+        {
+            var current = Interlocked.Increment(ref attempts);
+            if (current == 1)
+            {
+                ctx.Response.StatusCode = 429;
+                ctx.Response.AddHeader("Retry-After", "0");
+                await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"error\":\"rate_limit\"}");
+                return;
+            }
+
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "{\"ok\":true}");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(2, server.Requests.Count);
     }
 
     [Fact]
@@ -443,6 +526,153 @@ public sealed class CliIntegrationTests
         var request = server.Requests.Single();
         Assert.Equal("DELETE", request.Method);
         Assert.Equal("/users/user-1", request.Path);
+    }
+
+    [Fact]
+    public async Task PaginationParams_SendsPageAndPageSize()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, "[]");
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "projects",
+            "list",
+            "--page",
+            "2",
+            "--page-size",
+            "5");
+
+        Assert.Equal(0, result.ExitCode);
+        var request = server.Requests.Single();
+        Assert.Equal("2", request.Query["page"]);
+        Assert.Equal("5", request.Query["pageSize"]);
+    }
+
+    [Fact]
+    public async Task OutputTable_RendersTableForArrayResponse()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                [
+                  {"id": "1", "name": "Alice"},
+                  {"id": "2", "name": "Bob"}
+                ]
+                """);
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list",
+            "--output",
+            "table");
+
+        Assert.Equal(0, result.ExitCode);
+        // Table headers
+        Assert.Contains("id", result.StdOut);
+        Assert.Contains("name", result.StdOut);
+        // Table data
+        Assert.Contains("Alice", result.StdOut);
+        Assert.Contains("Bob", result.StdOut);
+        // Row count footer
+        Assert.Contains("2 row(s)", result.StdOut);
+        // Table borders (rounded style)
+        Assert.Contains("╭", result.StdOut);
+        Assert.Contains("╰", result.StdOut);
+        // NOT JSON envelope
+        Assert.DoesNotContain("statusCode", result.StdOut);
+        Assert.DoesNotContain("traceId", result.StdOut);
+    }
+
+    [Fact]
+    public async Task OutputTable_WithSelect_FiltersColumnsAndRendersTable()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                [
+                  {"id": "1", "firstName": "Alice", "lastName": "Smith", "email": "alice@test.com"},
+                  {"id": "2", "firstName": "Bob", "lastName": "Jones", "email": "bob@test.com"}
+                ]
+                """);
+        });
+
+        var result = await RunCliAsync(
+            server.BaseUri,
+            "users",
+            "list",
+            "--output",
+            "table",
+            "--select",
+            "firstName,lastName");
+
+        Assert.Equal(0, result.ExitCode);
+        // Selected columns present
+        Assert.Contains("firstName", result.StdOut);
+        Assert.Contains("lastName", result.StdOut);
+        Assert.Contains("Alice", result.StdOut);
+        Assert.Contains("Smith", result.StdOut);
+        // Non-selected columns filtered out
+        Assert.DoesNotContain("email", result.StdOut);
+        Assert.DoesNotContain("alice@test.com", result.StdOut);
+    }
+
+    [Fact]
+    public async Task SkillCommand_OutputsMarkdownGuide()
+    {
+        var result = await RunCliAsyncWithoutToken(new Uri("http://127.0.0.1:1/"), "skill");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("# awk-cli", result.StdOut);
+        Assert.Contains("## Output Contract", result.StdOut);
+        Assert.Contains("statusCode", result.StdOut);
+        Assert.Contains("jq", result.StdOut);
+        Assert.Contains("--select", result.StdOut);
+        Assert.Contains("--page-size", result.StdOut);
+    }
+
+    [Fact]
+    public async Task JsonEnvelope_SupportsJqStyleExtraction()
+    {
+        using var server = new TestServer(async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.Headers["traceparent"] = "00-abc123";
+            await HttpListenerExtensions.RespondJsonAsync(ctx.Response, """
+                [
+                  {"id": "user-1", "firstName": "Alice"},
+                  {"id": "user-2", "firstName": "Bob"}
+                ]
+                """);
+        });
+
+        var result = await RunCliAsync(server.BaseUri, "users", "list");
+
+        Assert.Equal(0, result.ExitCode);
+        var output = JsonDocument.Parse(result.StdOut);
+
+        // jq '.statusCode'
+        Assert.Equal(200, output.RootElement.GetProperty("statusCode").GetInt32());
+
+        // jq '.traceId'
+        Assert.Equal("00-abc123", output.RootElement.GetProperty("traceId").GetString());
+
+        // jq '.response[0].id'
+        var response = output.RootElement.GetProperty("response");
+        Assert.Equal("user-1", response[0].GetProperty("id").GetString());
+
+        // jq '.response[1].firstName'
+        Assert.Equal("Bob", response[1].GetProperty("firstName").GetString());
+
+        // jq '.response | length'
+        Assert.Equal(2, response.GetArrayLength());
     }
 
     private static Task<CliResult> RunCliAsync(Uri baseUri, params string[] args) =>

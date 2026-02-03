@@ -1,6 +1,8 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Awk.Models;
 
 namespace Awk.Generated;
@@ -31,22 +33,62 @@ public sealed partial class AworkClient
         CancellationToken cancellationToken)
     {
         var url = BuildUrl(path, query);
-        using var request = new HttpRequestMessage(new HttpMethod(method), url);
+        var httpMethod = new HttpMethod(method);
+        var contentFactory = await BuildContentFactory(body, contentType, cancellationToken);
+        var select = GetSelectQuery(query);
+        const int maxAttempts = 3;
 
-        if (body is not null)
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            if (body is HttpContent content)
+            using var request = new HttpRequestMessage(httpMethod, url);
+            var content = contentFactory?.Invoke();
+            if (content is not null)
             {
                 request.Content = content;
             }
-            else
+
+            using var response = await _http.SendAsync(request, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.TooManyRequests || attempt == maxAttempts)
             {
-                var json = JsonSerializer.Serialize(body, _jsonOptions);
-                request.Content = new StringContent(json, Encoding.UTF8, contentType ?? "application/json");
+                return await BuildEnvelopeAsync(response, select, cancellationToken);
+            }
+
+            var delay = GetRetryDelay(response.Headers, attempt);
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
             }
         }
 
-        using var response = await _http.SendAsync(request, cancellationToken);
+        throw new InvalidOperationException("Rate limit retry loop exhausted.");
+    }
+
+    private async Task<Func<HttpContent?>?> BuildContentFactory(object? body, string? contentType, CancellationToken cancellationToken)
+    {
+        if (body is null) return null;
+
+        if (body is HttpContent content)
+        {
+            var bytes = await content.ReadAsByteArrayAsync(cancellationToken);
+            var headers = content.Headers.ToList();
+            return () =>
+            {
+                var clone = new ByteArrayContent(bytes);
+                foreach (var header in headers)
+                {
+                    clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+                return clone;
+            };
+        }
+
+        var json = JsonSerializer.Serialize(body, _jsonOptions);
+        var mediaType = contentType ?? "application/json";
+        return () => new StringContent(json, Encoding.UTF8, mediaType);
+    }
+
+    private async Task<ResponseEnvelope<object?>> BuildEnvelopeAsync(HttpResponseMessage response, string? select, CancellationToken cancellationToken)
+    {
         var statusCode = (int)response.StatusCode;
         var traceId = ExtractTraceId(response.Headers);
         object? payload = null;
@@ -60,7 +102,116 @@ public sealed partial class AworkClient
             }
         }
 
+        if (payload is not null && !string.IsNullOrWhiteSpace(select) && statusCode is >= 200 and <= 299)
+        {
+            payload = ApplySelectFilter(payload, select);
+        }
+
         return new ResponseEnvelope<object?>(statusCode, traceId, payload);
+    }
+
+    private static TimeSpan GetRetryDelay(HttpResponseHeaders headers, int attempt)
+    {
+        var retryAfter = headers.RetryAfter;
+        if (retryAfter is not null)
+        {
+            if (retryAfter.Delta.HasValue)
+            {
+                return retryAfter.Delta.Value < TimeSpan.Zero ? TimeSpan.Zero : retryAfter.Delta.Value;
+            }
+
+            if (retryAfter.Date.HasValue)
+            {
+                var delay = retryAfter.Date.Value - DateTimeOffset.UtcNow;
+                return delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
+            }
+        }
+
+        var seconds = Math.Min(30, Math.Pow(2, attempt - 1));
+        return TimeSpan.FromSeconds(seconds);
+    }
+
+    private static string? GetSelectQuery(Dictionary<string, object?>? query)
+    {
+        if (query is null || query.Count == 0) return null;
+
+        foreach (var (key, value) in query)
+        {
+            if (!string.Equals(key, "select", StringComparison.OrdinalIgnoreCase)) continue;
+            if (value is null) return null;
+            if (value is string s) return s.Trim();
+            if (value is System.Collections.IEnumerable enumerable)
+            {
+                var parts = new List<string>();
+                foreach (var item in enumerable)
+                {
+                    if (item is null) continue;
+                    parts.Add(item.ToString() ?? string.Empty);
+                }
+                return string.Join(",", parts);
+            }
+            return value.ToString()?.Trim() ?? string.Empty;
+        }
+
+        return null;
+    }
+
+    private static object? ApplySelectFilter(object payload, string select)
+    {
+        if (payload is not JsonElement element) return payload;
+        var fields = ParseSelect(select);
+        if (fields.Count == 0) return payload;
+        return FilterElement(element, fields);
+    }
+
+    private static HashSet<string> ParseSelect(string select)
+    {
+        var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in select.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = token.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed)) continue;
+            fields.Add(trimmed);
+        }
+        return fields;
+    }
+
+    private static JsonNode? FilterElement(JsonElement element, HashSet<string> fields)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => FilterObject(element, fields),
+            JsonValueKind.Array => FilterArray(element, fields),
+            _ => JsonNode.Parse(element.GetRawText())
+        };
+    }
+
+    private static JsonNode FilterObject(JsonElement element, HashSet<string> fields)
+    {
+        var node = new JsonObject();
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!fields.Contains(property.Name)) continue;
+            node[property.Name] = JsonNode.Parse(property.Value.GetRawText());
+        }
+        return node;
+    }
+
+    private static JsonNode FilterArray(JsonElement element, HashSet<string> fields)
+    {
+        var array = new JsonArray();
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Object)
+            {
+                array.Add(FilterObject(item, fields));
+            }
+            else
+            {
+                array.Add(JsonNode.Parse(item.GetRawText()));
+            }
+        }
+        return array;
     }
 
     private string BuildUrl(string path, Dictionary<string, object?>? query)
@@ -75,6 +226,10 @@ public sealed partial class AworkClient
         foreach (var (key, value) in query)
         {
             if (value is null) continue;
+            if (string.Equals(key, "select", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             if (value is string s)
             {
                 parts.Add(Encode(key, s));

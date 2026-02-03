@@ -27,7 +27,7 @@
 | Manual DTO maintenance | Zero hand-written DTOs — all generated from `swagger.json` |
 
 ```
-$ awk-cli users list --top 3
+$ awk-cli users list --page-size 3
 
 {
   "statusCode": 200,
@@ -177,6 +177,21 @@ awk-cli auth status
 awk-cli auth logout
 ```
 
+### Global Options
+
+These options are available on all API commands:
+
+| Option | Description |
+|--------|-------------|
+| `--select <FIELDS>` | Filter response fields (client-side). Example: `--select "id,name,createdOn"` |
+| `--output <FORMAT>` | Output format: `json` (default) or `table` |
+| `--page <N>` | Page number for paginated endpoints (default: 1) |
+| `--page-size <N>` | Items per page for paginated endpoints |
+| `--env <PATH>` | Load environment variables from a custom `.env` file |
+| `--token <TOKEN>` | Override the API token for this request |
+| `--auth-mode <MODE>` | Force auth mode: `auto`, `token`, or `oauth` |
+| `--config <PATH>` | Use a custom config file path |
+
 ---
 
 ## Examples
@@ -186,6 +201,12 @@ awk-cli auth logout
 ```bash
 # List users
 awk-cli users list
+
+# List with pagination and field selection
+awk-cli users list --page-size 5 --select "id,firstName,lastName"
+
+# Table output for quick inspection
+awk-cli users list --output table --select "firstName,lastName"
 
 # Get user by ID (positional path param)
 awk-cli users get 550e8400-e29b-41d4-a716-446655440000
@@ -232,6 +253,28 @@ awk-cli workspace absence-regions users-assign \
 # Nested properties
 awk-cli task-tags tasks-update-tags \
   --set newTag.name=Priority
+```
+
+### Piping with jq
+
+The consistent JSON envelope makes `jq` integration seamless:
+
+```bash
+# Get first user's ID
+awk-cli users list --page-size 1 | jq -r '.response[0].id'
+
+# List project names only
+awk-cli projects list | jq -r '.response[].name'
+
+# Get task count by status
+awk-cli tasks list | jq '.response | group_by(.taskStatusId) | map({status: .[0].taskStatusId, count: length})'
+
+# Chain commands: create task for first active user
+USER_ID=$(awk-cli users list --page-size 1 | jq -r '.response[0].id')
+awk-cli tasks create --name "Welcome" --base-type private --entity-id "$USER_ID"
+
+# Check if request succeeded
+awk-cli users me | jq -e '.statusCode == 200' > /dev/null && echo "OK" || echo "Failed"
 ```
 
 ### Real-World Workflow: Onboard a New Team Member

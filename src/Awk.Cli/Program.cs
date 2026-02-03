@@ -19,6 +19,8 @@ app.Configure(config =>
 
     config.AddCommand<DoctorCommand>("doctor")
         .WithDescription("Validate token and connectivity");
+    config.AddCommand<SkillCommand>("skill")
+        .WithDescription("Print AI-friendly CLI reference");
     GeneratedCli.Register(config);
 });
 

@@ -18,6 +18,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         "Token",
         "AuthMode",
         "ConfigPath",
+        "Select",
         "Body",
         "Set",
         "SetJson"
@@ -29,6 +30,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         "token",
         "auth-mode",
         "config",
+        "select",
         "body",
         "set",
         "set-json"
@@ -213,13 +215,22 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
 
         var schemaMap = schemas.EnumerateObject().ToDictionary(k => k.Name, v => v.Value, StringComparer.Ordinal);
 
+        var parameterMap = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (components.TryGetProperty("parameters", out var parameters))
+        {
+            foreach (var p in parameters.EnumerateObject())
+            {
+                parameterMap[p.Name] = p.Value;
+            }
+        }
+
         var dtoSource = GenerateDtos(schemas);
         context.AddSource("AworkDtos.g.cs", SourceText.From(dtoSource, Encoding.UTF8));
 
-        var clientSource = GenerateClient(paths, schemaMap);
+        var clientSource = GenerateClient(paths, schemaMap, parameterMap);
         context.AddSource("AworkClient.Operations.g.cs", SourceText.From(clientSource, Encoding.UTF8));
 
-        var cliSource = GenerateCli(paths, schemaMap);
+        var cliSource = GenerateCli(paths, schemaMap, parameterMap);
         context.AddSource("AworkCli.g.cs", SourceText.From(cliSource, Encoding.UTF8));
     }
 
@@ -237,9 +248,9 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         return null;
     }
 
-    private static string GenerateClient(JsonElement paths, Dictionary<string, JsonElement> schemaMap)
+    private static string GenerateClient(JsonElement paths, Dictionary<string, JsonElement> schemaMap, Dictionary<string, JsonElement> parameterMap)
     {
-        var operations = CollectOperationInfos(paths, schemaMap);
+        var operations = CollectOperationInfos(paths, schemaMap, parameterMap);
 
 
         var sb = new StringBuilder();
@@ -258,7 +269,6 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         {
             var pathParams = OrderPathParams(op.Path, op.Parameters.Where(p => p.Location == "path").ToList());
             var queryParams = op.Parameters.Where(p => p.Location == "query").ToList();
-            var hasQuery = queryParams.Count > 0;
 
             sb.Append("    public Task<Awk.Models.ResponseEnvelope<object?>> ").Append(op.MethodName).Append('(');
 
@@ -281,12 +291,9 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
                 }
             }
 
-            if (hasQuery)
-            {
-                if (!first) sb.Append(", ");
-                first = false;
-                sb.Append("Dictionary<string, object?>? query = null");
-            }
+            if (!first) sb.Append(", ");
+            first = false;
+            sb.Append("Dictionary<string, object?>? query = null");
 
             if (!first) sb.Append(", ");
             sb.Append("CancellationToken cancellationToken = default");
@@ -295,7 +302,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
             sb.AppendLine("    {");
 
             var pathExpr = BuildPathExpression(op.Path, pathParams);
-            var queryArg = hasQuery ? "query" : "null";
+            var queryArg = "query";
             var bodyArg = op.HasBody ? "body" : "null";
             var contentArg = string.IsNullOrWhiteSpace(op.ContentType) ? "null" : "\"" + op.ContentType + "\"";
 
@@ -317,9 +324,9 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         return sb.ToString();
     }
 
-    private static string GenerateCli(JsonElement paths, Dictionary<string, JsonElement> schemaMap)
+    private static string GenerateCli(JsonElement paths, Dictionary<string, JsonElement> schemaMap, Dictionary<string, JsonElement> parameterMap)
     {
-        var operations = CollectOperationInfos(paths, schemaMap);
+        var operations = CollectOperationInfos(paths, schemaMap, parameterMap);
         var commandInfos = new List<CommandInfo>();
 
         var classNameUsed = new HashSet<string>(StringComparer.Ordinal);
@@ -520,7 +527,6 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
             var settingsName = "Settings";
             var pathParams = OrderPathParams(op.Path, op.Parameters.Where(p => p.Location == "path").ToList());
             var queryParams = op.Parameters.Where(p => p.Location == "query").ToList();
-            var hasQuery = queryParams.Count > 0;
 
             sb.AppendLine($"internal sealed class {className} : CommandBase<{className}.{settingsName}>");
             sb.AppendLine("{");
@@ -613,22 +619,20 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
                 }
             }
 
-            if (hasQuery)
+            sb.AppendLine("            var query = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);");
+            foreach (var param in queryParams)
             {
-                sb.AppendLine("            var query = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);");
-                foreach (var param in queryParams)
+                var property = $"settings.{param.PropertyName}";
+                if (param.IsArray)
                 {
-                    var property = $"settings.{param.PropertyName}";
-                    if (param.IsArray)
-                    {
-                        sb.AppendLine($"            if (settings.{param.PropertyName} is {{ Length: > 0 }}) query[\"{param.Name}\"] = {property};");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"            if (!string.IsNullOrWhiteSpace({property})) query[\"{param.Name}\"] = {property};");
-                    }
+                    sb.AppendLine($"            if (settings.{param.PropertyName} is {{ Length: > 0 }}) query[\"{param.Name}\"] = {property};");
+                }
+                else
+                {
+                    sb.AppendLine($"            if (!string.IsNullOrWhiteSpace({property})) query[\"{param.Name}\"] = {property};");
                 }
             }
+            sb.AppendLine("            if (!string.IsNullOrWhiteSpace(settings.Select)) query[\"select\"] = settings.Select;");
 
             if (op.HasBody)
             {
@@ -690,12 +694,9 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
                 argFirst = false;
                 methodCall.Append("body");
             }
-            if (hasQuery)
-            {
-                if (!argFirst) methodCall.Append(", ");
-                argFirst = false;
-                methodCall.Append("query");
-            }
+            if (!argFirst) methodCall.Append(", ");
+            argFirst = false;
+            methodCall.Append("query");
             if (!argFirst) methodCall.Append(", ");
             methodCall.Append("cancellationToken");
             methodCall.Append(");");
@@ -746,7 +747,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         return sb.ToString();
     }
 
-    private static List<OperationInfo> CollectOperationInfos(JsonElement paths, Dictionary<string, JsonElement> schemaMap)
+    private static List<OperationInfo> CollectOperationInfos(JsonElement paths, Dictionary<string, JsonElement> schemaMap, Dictionary<string, JsonElement> parameterMap)
     {
         var list = new List<OperationInfo>();
         var usedNames = new HashSet<string>(StringComparer.Ordinal);
@@ -783,7 +784,7 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
                 }
 
                 var tagName = tags.Count > 0 ? tags[0] : "Core";
-                var parameters = CollectParameters(pathItem, op);
+                var parameters = CollectParameters(pathItem, op, parameterMap);
                 EnsurePathParameters(path, parameters);
                 var (hasBody, bodyRequired, contentType) = GetRequestBody(op);
                 var bodyProperties = GetBodyPropertyInfos(op, schemaMap);
@@ -1583,23 +1584,41 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
         return sb.ToString();
     }
 
-    private static List<ParameterInfo> CollectParameters(JsonElement pathItem, JsonElement op)
+    private static List<ParameterInfo> CollectParameters(JsonElement pathItem, JsonElement op, Dictionary<string, JsonElement> parameterMap)
     {
         var list = new List<ParameterInfo>();
-        AddParameters(list, pathItem);
-        AddParameters(list, op);
+        AddParameters(list, pathItem, parameterMap);
+        AddParameters(list, op, parameterMap);
         return list;
     }
 
-    private static void AddParameters(List<ParameterInfo> list, JsonElement element)
+    private static void AddParameters(List<ParameterInfo> list, JsonElement element, Dictionary<string, JsonElement> parameterMap)
     {
         if (!element.TryGetProperty("parameters", out var parameters) || parameters.ValueKind != JsonValueKind.Array)
         {
             return;
         }
 
-        foreach (var param in parameters.EnumerateArray())
+        foreach (var rawParam in parameters.EnumerateArray())
         {
+            var param = rawParam;
+            if (rawParam.TryGetProperty("$ref", out var refProp))
+            {
+                var refPath = refProp.GetString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(refPath))
+                {
+                    var refName = ExtractParamRefName(refPath);
+                    if (!string.IsNullOrWhiteSpace(refName) && parameterMap.TryGetValue(refName, out var resolved))
+                    {
+                        param = resolved;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+            }
+
             if (!param.TryGetProperty("name", out var nameProp)) continue;
             if (!param.TryGetProperty("in", out var inProp)) continue;
 
@@ -1623,6 +1642,16 @@ public sealed class SwaggerClientGenerator : ISourceGenerator
             }
             list.Add(new ParameterInfo(name!, location!, identifier, propertyName, required, isArray, optionName));
         }
+    }
+
+    private static string ExtractParamRefName(string refPath)
+    {
+        const string prefix = "#/components/parameters/";
+        if (refPath.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return refPath.Substring(prefix.Length);
+        }
+        return string.Empty;
     }
 
     private static void EnsurePathParameters(string path, List<ParameterInfo> list)
